@@ -6,10 +6,10 @@ from models.unlimiformer.src.usage import UnlimiformerArguments
 
 class UnlimiformerRGB:
     def __init__(self, plm) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base", trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base", trust_remote_code=True)
         # self.model = AutoModelForCausalLM.from_pretrained(plm, trust_remote_code=True).half().cuda()
-        self.model = BartForConditionalGeneration.from_pretrained(plm, device_map='auto')
-        # self.model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base",torch_dtype=torch.float16, devices_map='auto', trust_remote_code=True)
+        # self.model = BartForConditionalGeneration.from_pretrained(plm, device_map='auto')
+        self.model = AutoModel.from_pretrained("google/flan-t5-base",torch_dtype=torch.float16, trust_remote_code=True)
         defaults = UnlimiformerArguments()
         unlimiformer_kwargs = {
                     'layer_begin': defaults.layer_begin, 
