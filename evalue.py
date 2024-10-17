@@ -5,10 +5,8 @@ import argparse,torch
 import os
 import json, tqdm, requests
 import yaml
-from models.models import *
+from .models.models import *
 
-
-    
 def processdata(instance, noise_rate, passage_num, filename, correct_rate = 0):
     query = instance['query']
     ans = instance['answer']
@@ -191,7 +189,7 @@ if __name__ == '__main__':
     passage_num = args.passage_num
 
     instances = []
-    with open(f'data/{args.dataset}.json','r') as f:
+    with open(f'benchmarks/RGB/data/{args.dataset}.json','r') as f:
         for line in f:
             instances.append(json.loads(line))
     if 'en' in args.dataset:
@@ -202,10 +200,10 @@ if __name__ == '__main__':
         os.mkdir(resultpath)
 
     if args.factchecking:
-        prompt = yaml.load(open('config/instruction_fact.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
+        prompt = yaml.load(open('benchmarks/RGB/config/instruction_fact.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
         resultpath = resultpath + '/fact'
     else:
-        prompt = yaml.load(open('config/instruction.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
+        prompt = yaml.load(open('benchmarks/RGB/config/instruction.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
 
     system = prompt['system']
     instruction = prompt['instruction']
@@ -228,8 +226,9 @@ if __name__ == '__main__':
         model = WizardLM(plm = args.plm)
     elif 'BELLE' in modelname:
         model = BELLE(plm = args.plm)
+    elif 'Unlimiformer' in modelname:
+        model = UnlimiformerRGB(plm = args.plm)
     
-
 
     filename = f'{resultpath}/prediction_{args.dataset}_{modelname}_temp{temperature}_noise{noise_rate}_passage{passage_num}_correct{args.correct_rate}.json'
     useddata = {}

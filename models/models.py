@@ -1,5 +1,48 @@
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM, BartForConditionalGeneration
 import torch
+
+from models.unlimiformer.src.unlimiformer import Unlimiformer
+from models.unlimiformer.src.usage import UnlimiformerArguments
+
+class UnlimiformerRGB:
+    def __init__(self, plm) -> None:
+        self.tokenizer = AutoTokenizer.from_pretrained("facebook/bart-base", trust_remote_code=True)
+        # self.model = AutoModelForCausalLM.from_pretrained(plm, trust_remote_code=True).half().cuda()
+        self.model = BartForConditionalGeneration.from_pretrained(plm, device_map='auto')
+        # self.model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base",torch_dtype=torch.float16, devices_map='auto', trust_remote_code=True)
+        defaults = UnlimiformerArguments()
+        unlimiformer_kwargs = {
+                    'layer_begin': defaults.layer_begin, 
+                    'layer_end': defaults.layer_end,
+                    'unlimiformer_head_num': defaults.unlimiformer_head_num, 
+                    'exclude_attention': defaults.unlimiformer_exclude, 
+                    'chunk_overlap': defaults.unlimiformer_chunk_overlap,
+                    'model_encoder_max_len': defaults.unlimiformer_chunk_size,
+                    'verbose': defaults.unlimiformer_verbose, 'tokenizer': self.tokenizer,
+                    'unlimiformer_training': defaults.unlimiformer_training,
+                    'use_datastore': defaults.use_datastore,
+                    'flat_index': defaults.flat_index,
+                    'test_datastore': defaults.test_datastore,
+                    'reconstruct_embeddings': defaults.reconstruct_embeddings,
+                    'gpu_datastore': defaults.gpu_datastore,
+                    'gpu_index': defaults.gpu_index
+        }
+        self.model = Unlimiformer.convert_model(self.model, **unlimiformer_kwargs)
+        self.model.eval()
+
+    def generate(self, text, temperature=0.7, system="", top_p=0.8,max_new_tokens=256):
+        if len(system) > 0:
+            text = system + '\n' + text
+            
+        query = f"Human:{text}\n\nAssistant:"
+        inputs = self.tokenizer(query, truncation=False, return_tensors="pt")
+        for k in inputs:
+            inputs[k] = inputs[k].cuda()
+        outputs = self.model.generate(**inputs, max_length=max_new_tokens)
+        response = self.tokenizer.batch_decode(outputs, ignore_special_tokens=True)[0]
+        # outputs = self.model.generate(**inputs, do_sample=True, temperature=temperature, top_p=top_p, max_length=max_new_tokens + inputs['input_ids'].size(-1))
+        # response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
 
 class ChatglmModel:
     def __init__(self, plm = 'THUDM/chatglm-6b') -> None:
