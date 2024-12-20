@@ -59,7 +59,11 @@ def processdata(instance, noise_rate, passage_num, filename, correct_rate = 0):
 
         positive = instance['positive'][:pos_num]
         negative = instance['negative'][:neg_num]
-
+        
+        # print(positive)
+        # print()
+        # print(negative)
+        # exit()
         docs = positive + negative
 
     random.shuffle(docs)
@@ -113,15 +117,12 @@ def predict(query, ground_truth, docs, model, system, instruction, temperature, 
         docs = '\n'.join(docs)
 
         
-
         text = instruction.format(QUERY=query, DOCS=docs)
-
         prediction = model.generate(text, temperature, system)
-
     if 'zh' in dataset:
         prediction = prediction.replace(" ","")
 
-    if '信息不足' in prediction or 'insufficient information' in prediction:
+    if '信息不足' in prediction or 'I can not answer the question' in prediction:
         labels = [-1]
     else:
         labels = checkanswer(prediction, ground_truth)
@@ -180,6 +181,10 @@ if __name__ == '__main__':
         '--factchecking', type=bool, default=False,
         help='whether to fact checking'
     )
+    parser.add_argument(
+        '--window_size', type=int, default=512,
+        help='length of context window'
+    )
     
     args = parser.parse_args()
 
@@ -187,9 +192,10 @@ if __name__ == '__main__':
     temperature = args.temp
     noise_rate = args.noise_rate
     passage_num = args.passage_num
+    window_size = args.window_size
 
     instances = []
-    with open(f'benchmarks/RGB/data/{args.dataset}.json','r') as f:
+    with open(f'rag_benchmarks/RGB/data/{args.dataset}.json','r') as f:
         for line in f:
             instances.append(json.loads(line))
     if 'en' in args.dataset:
@@ -200,17 +206,19 @@ if __name__ == '__main__':
         os.mkdir(resultpath)
 
     if args.factchecking:
-        prompt = yaml.load(open('benchmarks/RGB/config/instruction_fact.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
+        prompt = yaml.load(open('rag_benchmarks/RGB/config/instruction_fact.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
         resultpath = resultpath + '/fact'
     else:
-        prompt = yaml.load(open('benchmarks/RGB/config/instruction.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
+        prompt = yaml.load(open('rag_benchmarks/RGB/config/instruction.yaml', 'r'), Loader=yaml.FullLoader)[args.dataset[:2]]
 
     system = prompt['system']
     instruction = prompt['instruction']
 
     if modelname == 'chatgpt':
         model = OpenAIAPIModel(api_key = args.api_key, url = args.url)
-    elif 'Llama-2' in modelname:
+    elif 'UnlimiformerLlama' in modelname:
+        model = UnlimiformerLlama(plm = args.plm)
+    elif 'Llama' in modelname:
         model = LLama2(plm = args.plm)
     elif 'chatglm' in modelname:
         model = ChatglmModel(plm = args.plm)
@@ -226,11 +234,17 @@ if __name__ == '__main__':
         model = WizardLM(plm = args.plm)
     elif 'BELLE' in modelname:
         model = BELLE(plm = args.plm)
-    elif 'Unlimiformer' in modelname:
-        model = UnlimiformerRGB(plm = args.plm)
+    elif 'UnlimiformerFlanT5' in modelname:
+        model = UnlimiformerT5(plm = args.plm, window_size=window_size)
+    elif 'FlanT5' in modelname:
+        model = T5(plm = args.plm, window_size=window_size)
+    elif 'UnlimiformerOPT' in modelname:
+        model = UnlimiformerOPT(plm = args.plm)
+    elif 'OPT' in modelname:
+        model = OPT(plm = args.plm)
     
 
-    filename = f'{resultpath}/prediction_{args.dataset}_{modelname}_temp{temperature}_noise{noise_rate}_passage{passage_num}_correct{args.correct_rate}.json'
+    filename = f'{resultpath}/prediction_{args.dataset}_{modelname}_size{window_size}_temp{temperature}_noise{noise_rate}_passage{passage_num}_correct{args.correct_rate}.json'
     useddata = {}
     if os.path.exists(filename):
         with open(filename) as f:
@@ -246,7 +260,7 @@ if __name__ == '__main__':
                 f.write(json.dumps(useddata[instance['id']], ensure_ascii=False)+'\n')
                 continue
             try:
-                random.seed(2333)
+                # random.seed(2333)
                 if passage_num == 0:
                     query = instance['query']
                     ans = instance['answer']
@@ -269,6 +283,7 @@ if __name__ == '__main__':
                 f.write(json.dumps(newinstance, ensure_ascii=False)+'\n')
             except Exception as e:
                 print("Error:", e)
+                exit()
                 continue
     tt = 0
     for i in results:
@@ -304,4 +319,4 @@ if __name__ == '__main__':
 
     
 
-    json.dump(scores,open(f'{resultpath}/prediction_{args.dataset}_{modelname}_temp{temperature}_noise{noise_rate}_passage{passage_num}_correct{args.correct_rate}_result.json','w'),ensure_ascii=False,indent=4)
+    json.dump(scores,open(f'{resultpath}/prediction_{args.dataset}_{modelname}_size{window_size}_temp{temperature}_noise{noise_rate}_passage{passage_num}_correct{args.correct_rate}_result.json','w'),ensure_ascii=False,indent=4)

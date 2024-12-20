@@ -1,15 +1,37 @@
-from transformers import AutoTokenizer, AutoModel, AutoModelForCausalLM, BartForConditionalGeneration
+from transformers import \
+    AutoTokenizer, AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, \
+    BartTokenizer, BartForConditionalGeneration, \
+    BitsAndBytesConfig, \
+    OPTForCausalLM, \
+    T5ForConditionalGeneration, T5Tokenizer
+import bitsandbytes as bnb
 import torch
 
 from models.unlimiformer.src.unlimiformer import Unlimiformer
 from models.unlimiformer.src.usage import UnlimiformerArguments
 
-class UnlimiformerRGB:
+class OPT:
     def __init__(self, plm) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base", trust_remote_code=True)
-        # self.model = AutoModelForCausalLM.from_pretrained(plm, trust_remote_code=True).half().cuda()
-        # self.model = BartForConditionalGeneration.from_pretrained(plm, device_map='auto')
-        self.model = AutoModel.from_pretrained("google/flan-t5-base",torch_dtype=torch.float16, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(plm, trust_remote_code=True)
+        self.model = OPTForCausalLM.from_pretrained(plm, trust_remote_code=True).cuda()
+        self.model.resize_token_embeddings(len(self.tokenizer))
+
+    def generate(self, text, temperature=0.8, system="", top_p=0.8, max_new_tokens=256):
+        if len(system) > 0:
+            text = system + '\n' + text
+        query = f"Human:{text}\n\nAssistant:"
+        # inputs = self.tokenizer(query, truncation=False, return_tensors="pt")
+        inputs = self.tokenizer(query, truncation=True, max_length=2047, return_tensors="pt")
+        for k in inputs:
+            inputs[k] = inputs[k].cuda()
+        outputs = self.model.generate(**inputs, max_length=max_new_tokens + inputs['input_ids'].size(-1))
+        response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
+
+class UnlimiformerOPT:
+    def __init__(self, plm) -> None:
+        self.tokenizer = AutoTokenizer.from_pretrained(plm, trust_remote_code=True)
+        self.model = AutoModelForCausalLM.from_pretrained(plm, trust_remote_code=True).cuda()
         defaults = UnlimiformerArguments()
         unlimiformer_kwargs = {
                     'layer_begin': defaults.layer_begin, 
@@ -29,6 +51,70 @@ class UnlimiformerRGB:
         }
         self.model = Unlimiformer.convert_model(self.model, **unlimiformer_kwargs)
         self.model.eval()
+        self.model = self.model.cuda()
+
+    def generate(self, text, temperature=0.8, system="", top_p=0.8, max_new_tokens=256):
+        if len(system) > 0:
+            text = system + '\n' + text
+        query = f"Human:{text}\n\nAssistant:"
+        inputs = self.tokenizer(query, truncation=True, max_length=2048, return_tensors="pt")
+        for k in inputs:
+            inputs[k] = inputs[k].cuda()
+        outputs = self.model.generate(**inputs, max_length=max_new_tokens + inputs['input_ids'].size(-1))
+        response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
+
+class T5:
+    def __init__(self, plm, window_size) -> None:
+        self.window_size = window_size
+        self.tokenizer = AutoTokenizer.from_pretrained(plm, trust_remote_code=True)
+        self.model = T5ForConditionalGeneration.from_pretrained(plm, torch_dtype=torch.float16, trust_remote_code=True)
+        self.model.to("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = self.model.eval()
+
+    def generate(self, text, temperature=0.7, system="", top_p=0.8,max_new_tokens=256):
+        if len(system) > 0:
+            text = system + '\n' + text
+            
+        query = f"Human:{text}\n\nAssistant:"
+        inputs = self.tokenizer(query, truncation=False, return_tensors="pt")
+        # inputs = self.tokenizer(query, truncation=True, max_length=self.window_size, return_tensors="pt")
+        for k in inputs:
+            inputs[k] = inputs[k].cuda()
+        outputs = self.model.generate(**inputs, max_length=max_new_tokens)
+        response = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+        # outputs = self.model.generate(**inputs, do_sample=True, temperature=temperature, top_p=top_p, max_length=max_new_tokens + inputs['input_ids'].size(-1))
+        # response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
+
+class UnlimiformerT5:
+    def __init__(self, plm, window_size) -> None:
+        self.window_size = window_size
+        self.tokenizer = AutoTokenizer.from_pretrained(plm, trust_remote_code=True)
+        self.model = T5ForConditionalGeneration.from_pretrained(plm, torch_dtype=torch.float16, trust_remote_code=True, n_positions=window_size)
+        defaults = UnlimiformerArguments()
+        unlimiformer_kwargs = {
+                    'layer_begin': defaults.layer_begin, 
+                    'layer_end': defaults.layer_end,
+                    'unlimiformer_head_num': defaults.unlimiformer_head_num, 
+                    'exclude_attention': defaults.unlimiformer_exclude, 
+                    'chunk_overlap': defaults.unlimiformer_chunk_overlap,
+                    'model_encoder_max_len': defaults.unlimiformer_chunk_size,
+                    # 'model_encoder_max_len': 2048,
+                    'verbose': defaults.unlimiformer_verbose, 'tokenizer': self.tokenizer,
+                    'unlimiformer_training': defaults.unlimiformer_training,
+                    'use_datastore': defaults.use_datastore,
+                    # 'use_datastore': True,
+                    'flat_index': defaults.flat_index,
+                    'test_datastore': defaults.test_datastore,
+                    'reconstruct_embeddings': defaults.reconstruct_embeddings,
+                    'gpu_datastore': defaults.gpu_datastore,
+                    'gpu_index': defaults.gpu_index,
+                    # 'save_heatmap': True
+        }
+        self.model = Unlimiformer.convert_model(self.model, **unlimiformer_kwargs)
+        self.model.eval()
+        self.model.to("cuda" if torch.cuda.is_available() else "cpu")
 
     def generate(self, text, temperature=0.7, system="", top_p=0.8,max_new_tokens=256):
         if len(system) > 0:
@@ -39,7 +125,7 @@ class UnlimiformerRGB:
         for k in inputs:
             inputs[k] = inputs[k].cuda()
         outputs = self.model.generate(**inputs, max_length=max_new_tokens)
-        response = self.tokenizer.batch_decode(outputs, ignore_special_tokens=True)[0]
+        response = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
         # outputs = self.model.generate(**inputs, do_sample=True, temperature=temperature, top_p=top_p, max_length=max_new_tokens + inputs['input_ids'].size(-1))
         # response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
         return response
@@ -110,7 +196,7 @@ class Baichuan:
     def __init__(self, plm = 'baichuan-inc/Baichuan-13B-Chat') -> None:
         self.plm = plm
         self.tokenizer = AutoTokenizer.from_pretrained(plm, use_fast=False, trust_remote_code=True)
-        self.model = AutoModelForCausalLM.from_pretrained(plm, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True).eval()
+        self.model = AutoModelForCausalLM.from_pretrained(plm, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True).half().eval()
 
     def generate(self, text, temperature=0.8, system="", top_p=0.8):
         if len(system) > 0:
@@ -207,11 +293,69 @@ class LLama2:
     def __init__(self,plm) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(plm)
 
+        # quantization_config = BitsAndBytesConfig(load_in_8bit=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             plm,
             torch_dtype=torch.float16,
+            # quantization_config=quantization_config,
             device_map='auto'
         )
+    
+    def get_prompt(self, message: str, chat_history: list[tuple[str, str]],
+               system_prompt: str) -> str:
+        texts = [f'<s>[INST] <<SYS>>\n{system_prompt}\n<</SYS>>\n\n']
+        # The first user input is _not_ stripped
+        do_strip = False
+        for user_input, response in chat_history:
+            user_input = user_input.strip() if do_strip else user_input
+            do_strip = True
+            texts.append(f'{user_input} [/INST] {response.strip()} </s><s>[INST] ')
+        message = message.strip() if do_strip else message
+        texts.append(f'{message} [/INST]')
+        return ''.join(texts)
+
+    def generate(self, text, temperature=0.7, system="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.", top_p=0.8, max_new_tokens=256):
+        query = self.get_prompt(text, [], system)
+
+        inputs = self.tokenizer(query, return_tensors="pt", add_special_tokens=False,return_token_type_ids=False)
+        for k in inputs:
+            inputs[k] = inputs[k].cuda()
+
+        outputs = self.model.generate(**inputs, do_sample=True, temperature=temperature, top_p=top_p, max_length=max_new_tokens + inputs['input_ids'].size(-1))
+        response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        return response
+
+class UnlimiformerLlama:
+    def __init__(self, plm) -> None:
+        self.tokenizer = AutoTokenizer.from_pretrained(plm)
+        
+        # quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            plm,
+            torch_dtype=torch.float16,
+            # quantization_config=quantization_config,
+            device_map='auto'
+        )
+        defaults = UnlimiformerArguments()
+        unlimiformer_kwargs = {
+                    'layer_begin': defaults.layer_begin, 
+                    'layer_end': defaults.layer_end,
+                    'unlimiformer_head_num': defaults.unlimiformer_head_num, 
+                    'exclude_attention': defaults.unlimiformer_exclude, 
+                    'chunk_overlap': defaults.unlimiformer_chunk_overlap,
+                    'model_encoder_max_len': defaults.unlimiformer_chunk_size,
+                    'verbose': defaults.unlimiformer_verbose, 'tokenizer': self.tokenizer,
+                    'unlimiformer_training': defaults.unlimiformer_training,
+                    'use_datastore': defaults.use_datastore,
+                    'flat_index': defaults.flat_index,
+                    'test_datastore': defaults.test_datastore,
+                    'reconstruct_embeddings': defaults.reconstruct_embeddings,
+                    'gpu_datastore': defaults.gpu_datastore,
+                    'gpu_index': defaults.gpu_index
+        }
+        self.model = Unlimiformer.convert_model(self.model, **unlimiformer_kwargs)
+        self.model.eval()
+        self.model = self.model.cuda()
     
     def get_prompt(self, message: str, chat_history: list[tuple[str, str]],
                system_prompt: str) -> str:
