@@ -68,8 +68,18 @@ class T5:
     def __init__(self, plm, window_size) -> None:
         self.window_size = window_size
         self.tokenizer = AutoTokenizer.from_pretrained(plm, trust_remote_code=True)
-        self.model = T5ForConditionalGeneration.from_pretrained(plm, torch_dtype=torch.float16, trust_remote_code=True)
-        self.model.to("cuda" if torch.cuda.is_available() else "cpu")
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
+        self.model = T5ForConditionalGeneration.from_pretrained(
+            plm,
+            quantization_config=quantization_config,
+            device_map='auto'
+        )
+        # self.model = T5ForConditionalGeneration.from_pretrained(plm, torch_dtype=torch.float16, trust_remote_code=True, load_in_8bit=True)
+        # self.model.to("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.eval()
 
     def generate(self, text, temperature=0.7, system="", top_p=0.8,max_new_tokens=256):
@@ -293,11 +303,14 @@ class LLama2:
     def __init__(self,plm) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(plm)
 
-        # quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
         self.model = AutoModelForCausalLM.from_pretrained(
             plm,
-            torch_dtype=torch.float16,
-            # quantization_config=quantization_config,
+            quantization_config=quantization_config,
             device_map='auto'
         )
     
@@ -316,10 +329,13 @@ class LLama2:
 
     def generate(self, text, temperature=0.7, system="You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.", top_p=0.8, max_new_tokens=256):
         query = self.get_prompt(text, [], system)
-
         inputs = self.tokenizer(query, return_tensors="pt", add_special_tokens=False,return_token_type_ids=False)
         for k in inputs:
             inputs[k] = inputs[k].cuda()
+            
+        print(inputs['input_ids'])
+        print(inputs['input_ids'].shape)
+        exit()
 
         outputs = self.model.generate(**inputs, do_sample=True, temperature=temperature, top_p=top_p, max_length=max_new_tokens + inputs['input_ids'].size(-1))
         response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
@@ -329,11 +345,14 @@ class UnlimiformerLlama:
     def __init__(self, plm) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(plm)
         
-        # quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
         self.model = AutoModelForCausalLM.from_pretrained(
             plm,
-            torch_dtype=torch.float16,
-            # quantization_config=quantization_config,
+            quantization_config=quantization_config,
             device_map='auto'
         )
         defaults = UnlimiformerArguments()
@@ -354,8 +373,11 @@ class UnlimiformerLlama:
                     'gpu_index': defaults.gpu_index
         }
         self.model = Unlimiformer.convert_model(self.model, **unlimiformer_kwargs)
+        # print(1, self.model)
         self.model.eval()
-        self.model = self.model.cuda()
+        # print(2, self.model)
+        # self.model = self.model.cuda()
+        # print(3, self.model)
     
     def get_prompt(self, message: str, chat_history: list[tuple[str, str]],
                system_prompt: str) -> str:

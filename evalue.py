@@ -259,32 +259,32 @@ if __name__ == '__main__':
                 results.append(useddata[instance['id']])
                 f.write(json.dumps(useddata[instance['id']], ensure_ascii=False)+'\n')
                 continue
-            try:
-                # random.seed(2333)
-                if passage_num == 0:
-                    query = instance['query']
-                    ans = instance['answer']
-                    docs = []
-                else:
-                    query, ans, docs = processdata(instance, noise_rate, passage_num, args.dataset, args.correct_rate)
-                label,prediction,factlabel = predict(query, ans, docs, model,system,instruction,temperature,args.dataset)
-                instance['label'] = label
-                newinstance = {
-                    'id': instance['id'],
-                    'query': query,
-                    'ans': ans,
-                    'label': label,
-                    'prediction': prediction,
-                    'docs': docs,
-                    'noise_rate': noise_rate,
-                    'factlabel': factlabel
-                }
-                results.append(newinstance)
-                f.write(json.dumps(newinstance, ensure_ascii=False)+'\n')
-            except Exception as e:
-                print("Error:", e)
-                exit()
-                continue
+            # try:
+            random.seed(2333)
+            if passage_num == 0:
+                query = instance['query']
+                ans = instance['answer']
+                docs = []
+            else:
+                query, ans, docs = processdata(instance, noise_rate, passage_num, args.dataset, args.correct_rate)
+            label,prediction,factlabel = predict(query, ans, docs, model,system,instruction,temperature,args.dataset)
+            instance['label'] = label
+            newinstance = {
+                'id': instance['id'],
+                'query': query,
+                'ans': ans,
+                'label': label,
+                'prediction': prediction,
+                'docs': docs,
+                'noise_rate': noise_rate,
+                'factlabel': factlabel
+            }
+            results.append(newinstance)
+            f.write(json.dumps(newinstance, ensure_ascii=False)+'\n')
+            # except Exception as e:
+            #     print("Error:", e)
+            #     exit()
+            #     continue
     tt = 0
     for i in results:
         label = i['label']
